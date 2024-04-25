@@ -36,6 +36,52 @@ echo -e "\033[32mConverting PDF to HTML...\033[0m"
 pdftohtml -xml "$input_pdf" output.xml
 echo -e "\033[32mConversion complete.\033[0m"
 
+echo -e "\033[32mExtracting images.\033[0m"
+
+if [ ! -d "$./images" ]; then
+  mkdir "./images"
+fi
+
+# Verificar si README.md existe
+if [ -f "README.md" ]; then
+    # Si existe, vaciar el archivo
+    rm "README.md"
+    echo "Clear Readme.md."
+fi
+
+touch "README.md"
+
+echo -e "<style>" > README.md
+
+# Extraer las fuentes del archivo XML y formatearlas en CSS
+grep -oP '<fontspec id="\d+" size="\d+" family="([^"]+)" color="#([0-9a-fA-F]{6})"/>' "output.xml" | while read -r linea; do
+    # Extraer atributos de la fuente
+    id=$(echo "$linea" | grep -oP 'id="\d+"' | grep -oP '\d+')
+    size=$(echo "$linea" | grep -oP 'size="\d+"' | grep -oP '\d+')
+    family=$(echo "$linea" | grep -oP 'family="([^"]+)"' | grep -oP '"\K[^"]+(?=")')
+    color=$(echo "$linea" | grep -oP 'color="#([0-9a-fA-F]{6})"' | grep -oP '"\K[^"]+(?=")')
+    echo $color
+     if [ "$color" = "#000000" ]; then
+    color="#$color"
+fi
+    # Generar estilo CSS para la fuente
+    echo -e ".font-$id {\n    font-family: $family, sans-serif;\n    font-size: ${size}px;\n    color: $color;\n}\n" >> README.md
+done
+
+# Cerrar estilo CSS
+echo -e "</style>" >> README.md
+
+
+# Directorio actual
+dir_actual=$(pwd)
+
+# Directorio destino
+directorio_destino="$dir_actual/images"
+
+find "$dir_actual" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -exec mv {} $(pwd)"/images" \;
+
+
+
 # Function to clean text
 clean_text() {
   # Remove special characters
@@ -56,9 +102,6 @@ extract_headings() {
   grep '<title>' output.xml | sed -E 's/<title.*>(.*)<\/title>/\1/' | clean_text | sed -E 's/^# (.*)$/# \1/'
 }
 
-# Create the README.md
-echo "# PDF Content" > README.md
-
 # Extract and organize content in the order it appears in the PDF
 while IFS= read -r line; do
     if [[ $line == *"<title>"* ]]; then
@@ -68,25 +111,32 @@ while IFS= read -r line; do
     elif [[ $line == *"<text"* ]]; then
         echo -e "\033[33mMatched Rule 2: Text\033[0m"
         echo $line
-        text_content=$(echo "$line" | sed -E 's/.*>(.*)<\/text>/\1/' | clean_text)
+        #text_content=$(echo "$line" | sed -E 's/.*>(.*)<\/text>/\1/' | clean_text)
+        text_content=$(echo "$line" | sed -E 's/.*<text[^>]*>(.*?)<\/text>.*/\1/' | clean_text)
+
+        echo $text_content
         text_top=$(echo "$line" | sed -E 's/.*top="([^"]*)".*/\1/')
         text_left=$(echo "$line" | sed -E 's/.*left="([^"]*)".*/\1/')
         text_font=$(echo "$line" | sed -E 's/.*font="([^"]*)".*/\1/')
         # Adjust representation based on font, top, and left values
-        if [ "$text_font" -eq 1 ]; then
-            echo "$text_content" >> README.md
-        elif [ "$text_font" -eq 2 ]; then
-            echo "## $text_content" >> README.md
-        else
-            echo "### $text_content" >> README.md
-        fi
-        echo "" >> README.md
+        # Extract font size using XMLStarlet
+        # Extract font size using grep and sed
+        echo $text_font
+        #size=$(grep -o "<fontspec id=\"$text_font\".*" "output.xml" | sed 's/.*size="\([0-9]*\)".*/\1/')
+        #color=$(grep -o "<fontspec id=\"$text_font\".*" "output.xml" | sed 's/.*color="#\([0-9a-fA-F]*\)".*/\1/')
+        #family=$(grep -o "<fontspec id=\"$text_font\".*" "output.xml" | sed 's/.*family="\([^"]*\)".*/\1/')
+        #echo font details $family $size $color
+        fuente=$(grep -oP "\.font-$text_font" README.md | head -n 1)
+        echo $fuente
+
+      echo '<span class="'${fuente:1}'">'$text_content'</span><br>' >> README.md
+
     elif [[ $line == *"<image"* ]]; then
         # Rule 3: Match image tag
         echo -e "\033[34mMatched Rule 3: Image Tag\033[0m"
         echo $line
         image_src=$(echo "$line" | sed -E 's/.*src="([^"]*)".*/\1/')
-        echo "![Image]($image_src)" >> README.md
+        echo "![Image](images/$image_src)" >> README.md
         echo "" >> README.md
     fi
 done < output.xml
